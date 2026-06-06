@@ -1,0 +1,51 @@
+import time
+import pandas as pd
+
+class AnomalyEngine:
+    def __init__(self, depth_history_window: int = 20):
+        self.history = []  # List of dicts tracking snapshots
+        self.window = depth_history_window
+
+    def compute_obi(self, bid_depth, ask_depth) -> float:
+        total_bid_vol = sum(level['Volume'] for level in bid_depth)
+        total_ask_vol = sum(level['Volume'] for level in ask_depth)
+        
+        denominator = total_bid_vol + total_ask_vol
+        if denominator == 0:
+            return 0.0
+        return (total_bid_vol - total_ask_vol) / denominator
+
+    def log_snapshot(self, bid_depth, ask_depth):
+        total_depth = sum(l['Volume'] for l in bid_depth) + sum(l['Volume'] for l in ask_depth)
+        current_time = time.time()
+        
+        self.history.append({
+            'timestamp': current_time,
+            'total_depth': total_depth,
+            'obi': self.compute_obi(bid_depth, ask_depth)
+        })
+        
+        if len(self.history) > self.window:
+            self.history.pop(0)
+
+    def detect_liquidity_hole(self) -> dict:
+        """Flashes warning if total depth drops > 50% relative to rolling history window"""
+        if len(self.history) < 5:
+            return {"status": "NORMAL", "drop_pct": 0.0}
+
+        current_depth = self.history[-1]['total_depth']
+        max_historical_depth = max(snap['total_depth'] for snap in self.history[:-1])
+
+        if max_historical_depth == 0:
+            return {"status": "NORMAL", "drop_pct": 0.0}
+
+        drop_pct = (max_historical_depth - current_depth) / max_historical_depth * 100
+
+        if drop_pct >= 50.0:
+            return {
+                "status": "CRITICAL ANOMALY DETECTED",
+                "drop_pct": round(drop_pct, 2),
+                "timestamp": time.strftime('%H:%M:%S', time.localtime(self.history[-1]['timestamp']))
+            }
+        
+        return {"status": "NORMAL", "drop_pct": round(drop_pct, 2)}
